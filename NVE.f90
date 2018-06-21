@@ -8,45 +8,6 @@ program nveSim
 
     integer, parameter :: dp = kind(1.0)!Give reals double precision
 
-    integer :: numAtoms !Number of atoms in this simulation
-
-    !Position and Velocity information about atoms in the system 
-    real(dp), dimension(:, :), allocatable :: pos, vel !pos: [m], vel: [m/s]
-
-    !Force exerted on atoms at a given timestep
-    real(dp), dimension(:, :), allocatable :: force ![N] 
-    real(dp), dimension(:), allocatable :: distBins ![]
-
-    integer, parameter :: numDimensions = 3 !Dimension of position 
-    !and velocity space
-    integer, parameter :: CvvStep = 300 !Number of items in Cvv
-    integer, parameter :: MSDStep = 300 !Number of items in MSD
-
-    real(dp) :: Epot ![J] Potential of the entire system
-    real(dp) :: totEnergy ![J] Total energy of the system
-    real(dp) :: potential ![J] the total potential energy of the system
-    real(dp) :: vSQ ![(m/s)^2] Square velocity of a given atom
-    real(dp) :: vOld ![m/s] Temp variable for velocity
-    real(dp) :: Fmag ![N] Used to hold the magnitude of force btwn two atoms
-    real(dp) :: kineticEnergy ![J] The total kinetic energy of the system
-
-    real :: start_time
-    real :: end_time
-
-    !Used to record the distance between two atoms
-    real(dp), dimension(numDimensions) :: distance
-    real(dp) :: distanceSq
-    real(dp) :: distanceMag
-
-    real(dp), dimension(CvvStep) :: Cvv
-    real(dp) :: CvvOne = 0
-    real(dp), dimension(MSDStep) :: MSD
-    real(dp), dimension(:, :, :), allocatable :: vStore
-    real(dp), dimension(:, :, :), allocatable :: pStore
-    integer :: nCorr = 0
-    integer :: nCorr_MSD = 0
-    real(dp) :: diffusionCoeff = 0
-
     !Iterators
     integer :: i, j, k, m, l, n, p
 
@@ -58,9 +19,6 @@ program nveSim
     real(dp), parameter :: sigma = 34.0E-11 ![m]. Constant in the Lennard 
                                             !Jones equation
     real(dp), parameter :: sigmaSq = sigma**2
-    real(dp) :: sigmaDistTwo![]. Used for optimizational purposes
-    real(dp) :: sigmaDistSix ![]. Used for optimizational purposes
-    real(dp) :: sigmaDistTwelve![]. Used for optimizational purposes
     real(dp), parameter :: dim = 3.4700E-9![m] Size of each wall of the cubic enclosure
     real,parameter :: cutoff = 2.25 * sigma ![m] Cutoff distance for 
                                             !short-range interaction
@@ -69,12 +27,57 @@ program nveSim
     real(dp) :: cutoffSq = cutoff**2 ![m^2] The cutoff radius squared
     real(dp) :: twentyFourEps = 24.0 * epsilon ![J] Epsilon*24. 
                                                !Used for optimization
-    integer, parameter :: numSteps = 24000 !Number of timesteps in the program
+    integer, parameter :: numSteps = 100000 !Number of timesteps in the program
 
     integer, parameter :: zeroMomentTimeStep = 100 !Number of timesteps 
                                                     !between momentum-zeroing
     integer, parameter :: numTrajSteps = 10 !Number of timesteps between 
                                             !trajectory outputs to .ttr file
+    integer, parameter :: numDimensions = 3 !Dimension of position 
+                                            !and velocity space
+    integer, parameter :: CvvStep = 300 !Number of items in Cvv
+    integer, parameter :: MSDStep = 300 !Number of items in MSD
+
+    integer :: numAtoms !Number of atoms in this simulation
+
+    !Position and Velocity information about atoms in the system 
+    real(dp), dimension(:, :), allocatable :: pos, vel !pos: [m], vel: [m/s]
+
+    !Force exerted on atoms at a given timestep
+    real(dp), dimension(:, :), allocatable :: force ![N] 
+
+    !Information on number of occurances of distances between atoms
+    real(dp), dimension(:), allocatable :: distBins ![]
+
+    real(dp) :: Epot ![J] Potential of the entire system
+    real(dp) :: totEnergy ![J] Total energy of the system
+    real(dp) :: potential ![J] the total potential energy of the system
+    real(dp) :: vSQ ![(m/s)^2] Square velocity of a given atom
+    real(dp) :: vOld ![m/s] Temp variable for velocity
+    real(dp) :: Fmag ![N] Used to hold the magnitude of force btwn two atoms
+    real(dp) :: kineticEnergy ![J] The total kinetic energy of the system
+
+    !Record start and end times of the simulation
+    real :: start_time
+    real :: end_time
+
+    !Used to record the distance between two atoms
+    real(dp), dimension(numDimensions) :: distance
+    real(dp) :: distanceSq
+    real(dp) :: distanceMag
+    real(dp) :: sigmaDistTwo![]. Used for optimizational purposes
+    real(dp) :: sigmaDistSix ![]. Used for optimizational purposes
+    real(dp) :: sigmaDistTwelve![]. Used for optimizational purposes
+
+    !Variables to calculate MSD and TCF
+    real(dp), dimension(CvvStep) :: Cvv
+    real(dp) :: CvvOne = 0
+    real(dp), dimension(MSDStep) :: MSD
+    real(dp), dimension(:, :, :), allocatable :: vStore
+    real(dp), dimension(:, :, :), allocatable :: pStore
+    integer :: nCorr = 0
+    integer :: nCorr_MSD = 0
+    real(dp) :: diffusionCoeff = 0
 
     !Set up data for finding g(r)
     real(dp), parameter :: delR = 0.003e-9
@@ -89,24 +92,28 @@ program nveSim
     real(dp) :: rUpper
     real(dp) :: shellVol
 
+    !Garbage variables
     character :: nullChar
     character :: nullChar1
     integer :: nullInt
     integer :: nullInt1
+    real :: dumr
 
     CALL cpu_time(start_time)
 
     !Open file containing position and velocity information 
     !about argon atoms in the cubic boundary from argon.gro
     open(unit=11, file='NVT_final.gro') 
+    open(unit=90, file='NVE_temperature.dat')
     open(unit=91, file='NVE_totEnergy.dat')
     open(unit=92, file='NVE_potentialEnergy.dat')
     open(unit=93, file='NVE_kineticEnergy.dat')
     open(unit=94, file='NVE.gro')
     open(unit=95, file='NVE_final.gro')
-    open(unit=96, file='TCF.dat')
+    open(unit=96, file='TCFNorm.dat')
     open(unit=97, file='gr.dat')
     open(unit=98, file='MSD.dat')
+    open(unit=99, file='TCF.dat')
 
     !Read in header information from the file
     read(11, *) nullChar
@@ -120,6 +127,7 @@ program nveSim
     allocate(pStore(numAtoms, numDimensions, MSDStep))
     allocate(bins(numBins))
 
+    !Calculate information about g(r) based on numAtoms read in
     rho = numAtoms / (dim ** 3)
     sphereConst = 4.0D0 * pi * rho / 3.0D0
 
@@ -128,6 +136,12 @@ program nveSim
         read(11, 10) nullInt, nullChar, nullChar1, nullInt1, pos(m,1), &
             & pos(m,2), pos(m,3), vel(m,1), vel(m,2), vel(m,3)
     end do
+
+    read(11,10) dumr
+
+    if (dumr.NE.dim) then
+        print *, "Incorrect dimension read in"
+    end if
 
     !Convert read-in pos/velocity information from nm and nm/ps to m and m/s
     do i = 1, numAtoms
@@ -143,6 +157,7 @@ program nveSim
     !in each direction is zero. This prevents wandering ice-cube problem
     call zeroNetMomentum(vel, numAtoms, numDimensions)
 
+    !Initialize TCF, g(r), and MSD information
     do i = 1, CvvStep
         Cvv(i) = 0.0D0
     end do
@@ -210,7 +225,7 @@ program nveSim
                     end do
                 end if
 
-
+                !Add to the appropriate bin current information about atomic distance
                 currIndex = Int(sqrt(distanceSq)/delR) + 1
                 bins(currIndex) = bins(currIndex) + 2
             end do
@@ -239,11 +254,14 @@ program nveSim
         !print *, "Curr Temp:", kineticEnergy * (2.0D0 / (3 * numAtoms * Bolz))
         totEnergy = Epot + kineticEnergy
 
+        !Write the files information about the simulation's energy
+        write(90, *) (timestep * real(p)), (kineticEnergy * 2.0) / &
+                                    &(3.0 * real(numAtoms) * Bolz)
         write(91, *) (timestep * real(p)), totEnergy
         write(92, *) (timestep * real(p)), Epot
         write(93, *) (timestep * real(p)), kineticEnergy
 
-        !Write .ttr file 
+        !Write trajectory file for vmd
         if (mod(p, numTrajSteps) == 0) then
             write(94, *) "Trajectory file for NVE ensemble. 1ns total time"
             write(94, 30) numAtoms
@@ -272,15 +290,17 @@ program nveSim
     end do
 
     !Output the TCF graph and calculate the diffusion coefficient from it
-    CvvOne = Cvv(1)/real(nCorr)
+    CvvOne = Cvv(1) / (real(nCorr * 3.0 * numAtoms))
     do m = 1, CvvStep
         if (m < 200) then
-            write(96, *) (real(m) * timestep) * 1e12, &
-                         &(Cvv(m)/real(nCorr)) / CvvOne
+            write(96, *) (real(m) * timestep) * 1e12, (Cvv(m)/real(nCorr))/ CvvOne
+            write(99, *) (real(m) * timestep) * 1e12, (Cvv(m)/real(nCorr)) 
         end if
-        diffusionCoeff = diffusionCoeff + (Cvv(m) / real(nCorr)) * timestep
+        diffusionCoeff = diffusionCoeff + (Cvv(m) / (real(nCorr))) * timestep
     end do
     print *, "DiffusionCoefficient: ", diffusionCoeff * 1e4
+    print *, "desiredCvv1: ", 3.0 * Bolz * 94.4 / arMass, &
+                                          &"actualCvv1", Cvv(1)*3.0 / real(nCorr)
 
     !Output the MSD graph
     do m = 1, MSDStep
@@ -305,6 +325,7 @@ program nveSim
     deallocate(pStore)
     deallocate(bins)
 
+    close (unit=90)
     close (unit=91)
     close (unit=92)
     close (unit=93)
@@ -313,6 +334,7 @@ program nveSim
     close (unit=96)
     close (unit=97)
     close (unit=98)
+    close (unit=99)
 
     CALL cpu_time(end_time)
     print *, "Time usage:", end_time - start_time, " seconds"
@@ -359,11 +381,11 @@ contains
         real(dp), dimension(numDimensions) :: netVel
         real(dp), dimension(numDimensions) :: velScale
 
-        !Find the current velocity of the system
         do k = 1, numDimensions
             netVel(k) = 0.0
         end do
 
+        !Find the current velocity of the system
         do i = 1, numAtoms
             do k = 1, numDimensions
                 netVel(k) = netVel(k) + vel(i, k) 

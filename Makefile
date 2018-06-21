@@ -10,6 +10,9 @@ nvtSim: NVT.f90
 argonBox: argonBox.f90
 	gfortran -o argonBox argonBox.f90
 
+drawVelDist: drawVelDist.f90
+	gfortran -o drawVelDist drawVelDist.f90
+
 force1: force1.f90
 	gfortran -o force force1.f90
 

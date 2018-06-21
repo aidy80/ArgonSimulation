@@ -1,12 +1,43 @@
 !Aidan Fike
 !March 2, 2017
 !Program to simulated argon atoms in a cube based on lennard jones iteractions.
-!Program will simulate atoms for 1us with 100,000 .01ps timesteps
+!Program will simulate atoms for 1us with 100,000 .01ps timesteps under NVT conditions
 
 program nvtSim
     implicit none
 
     integer, parameter :: dp = kind(1.0)!Give reals double precision
+
+    !Iterators
+    integer :: i, j, k, m, l, n, p
+
+    !Constants
+    real(dp), parameter :: arMass = 6.6904265E-26 ![kg] Mass of argon
+    real(dp), parameter :: timeStep = 1.0E-14 ![s] Time between calculations
+    real(dp), parameter :: Bolz = 1.38064852E-23 ![J/K] Boltzmann constant
+    real(dp), parameter :: epsilon = 120.0 * Bolz![J] Minimum in the 
+                                                 !    Lennard Jones equation
+    real(dp), parameter :: sigma = 3.4E-10 ![m]. Constant in the Lennard 
+                                            !     Jones equation
+    real(dp), parameter :: sigmaSq = sigma**2 ![m^2] Sigma squared
+    real(dp), parameter :: dim = 3.4700E-9![m] Size of each wall of the cubic enclosure
+    real(dp), parameter :: temperature = 94.4 ![K] Const temperature of the system
+    real(dp), parameter :: cutoff = 2.25 * sigma ![m] Cutoff distance for 
+                                            !         short-range interaction
+    real(dp), parameter :: fourEps = 4.0 * epsilon ![J4] Epsilon*4. Used for optimization
+    real(dp), parameter :: cutoffSq = cutoff**2 ![m^2] The cutoff radius squared
+    real(dp), parameter :: twentyFourEps = 24.0 * epsilon ![J*24] Epsilon*24. 
+                                                          !Used for optimization
+    integer, parameter :: numDimensions = 3 !Dimension of position 
+                                            !and velocity space
+
+    integer, parameter :: numSteps = 100000 !Number of timesteps in the program
+
+    integer, parameter :: zeroMomentTimeStep = 100 !Number of timesteps 
+                                                   !between momentum-zeroing
+    integer, parameter :: numTrajSteps = 10 !Number of timesteps between 
+                                            !trajectory outputs to .ttr file
+
 
     integer :: numAtoms !Number of atoms in this simulation
 
@@ -16,9 +47,6 @@ program nvtSim
     !Force exerted on atoms at a given timestep
     real(dp), dimension(:, :), allocatable :: force ![N] 
 
-    integer, parameter :: numDimensions = 3 !Dimension of position 
-                                            !and velocity space
-
     real(dp) :: Epot ![J] Potential of the entire system
     real(dp) :: totEnergy ![J] Total energy of the system
     real(dp) :: potential ![J] the total potential energy of the system
@@ -26,7 +54,9 @@ program nvtSim
     real(dp) :: vOld ![m/s] Temp variable for velocity
     real(dp) :: Fmag ![N] Used to hold the magnitude of force btwn two atoms
     real(dp) :: kineticEnergy ![J] The total kinetic energy of the system
+    real(dp) :: kineticEnergyScale ![J] The total kinetic energy of the system
 
+    !Store runtime of the simulation
     real :: start_time
     real :: end_time
 
@@ -34,39 +64,11 @@ program nvtSim
     real(dp), dimension(numDimensions) :: distance
     real(dp) :: distanceSq
     real(dp) :: distanceMag
-
-    !Iterators
-    integer :: i, j, k, m, l, n, p
-
-    !Constants
-    real(dp), parameter :: arMass = 6.6904265E-26 ![kg] Mass of argon
-    real(dp), parameter :: Bolz = 1.38064852E-23 ![J/K] Boltzmann constant
-    real(dp), parameter :: epsilon = 120.0 * Bolz![J] Minimum in the 
-                                                 !    Lennard Jones equation
-    real(dp), parameter :: sigma = 3.4E-10 ![m]. Constant in the Lennard 
-                                            !     Jones equation
-    real(dp), parameter :: sigmaSq = sigma**2 ![m^2] Sigma squared
-    real(dp) :: sigmaDistOne![]. (sigma/(distance between two atoms)). 
     real(dp) :: sigmaDistTwo![]. (sigma/(distance between two atoms))**2. 
     real(dp) :: sigmaDistSix ![]. (sigma/(distance between two atoms))**6. 
-    real(dp) :: sigmaDistSeven ![]. (sigma/(distance between two atoms))**7. 
     real(dp) :: sigmaDistTwelve![]. (sigma/(distance between two atoms))**12.  
-    real(dp) :: sigmaDistThirteen ![]. (sigma/(distance between two atoms))**13. 
-    real(dp) :: dim = 3.4700E-9![m] Size of each wall of the cubic enclosure
-    real(dp), parameter :: temperature = 94.4 ![K] Const temperature of the system
-    real,parameter :: cutoff = 2.25 * sigma ![m] Cutoff distance for 
-                                            !         short-range interaction
-    real, parameter :: timeStep = 1.0E-14 ![s] Time between calculations
-    real(dp) :: fourEps = 4.0 * epsilon ![J^4] Epsilon*4. Used for optimization
-    real(dp) :: cutoffSq = cutoff**2 ![m^2] The cutoff radius squared
-    real(dp) :: twentyFourEps = 24.0 * epsilon ![J^24] Epsilon*24. 
-                                               !        Used for optimization
-    integer, parameter :: numSteps = 10000 !Number of timesteps in the program
 
-    integer, parameter :: zeroMomentTimeStep = 100 !Number of timesteps 
-                                                   !between momentum-zeroing
-    integer, parameter :: numTrajSteps = 10 !Number of timesteps between 
-                                            !trajectory outputs to .ttr file
+    !Garbage Variables
     character :: nullChar
     character :: nullChar1
     integer :: nullInt
@@ -76,12 +78,13 @@ program nvtSim
 
     !Open file containing position and velocity information 
     !about argon atoms in the cubic boundary from argon.gro
-    open(unit=11, file='argon.gro') 
+    open(unit=11, file='initArgon.gro') 
     open(unit=91, file='NVT_totEnergy.dat')
     open(unit=92, file='NVT_potentialEnergy.dat')
     open(unit=93, file='NVT_kineticEnergy.dat')
     open(unit=94, file='NVT.gro')
     open(unit=95, file='NVT_final.gro')
+    open(unit=96, file='NVT_temperature.dat')
     
     !Read in header information from the file
     read(11, *) nullChar
@@ -126,12 +129,12 @@ program nvtSim
 
         Epot = 0.0
         kineticEnergy = 0.0
+        kineticEnergyScale = 0.0
 
         !Compute Force between each pair of atoms if their distance is below
         !the cutoff radius. Each pair is evaluated only once
         do i = 1, numAtoms - 1
             do j = i + 1, numAtoms
-
                 !Calculate the distance between the current atoms, applying 
                 !periodic boundary conditions to find the minimum possible 
                 !distance for each coordinate
@@ -141,26 +144,31 @@ program nvtSim
                 end do
 
                 distanceSq = distance(1)**2 + distance(2)**2 + distance(3)**2
-
-                sigmaDistTwo = (sigmaSq / distanceSq)
-                sigmaDistSix = sigmaDistTwo**3 
-                sigmaDistTwelve = sigmaDistSix**2
-
-                !Calc potential from lennard jones equation between the 
-                !current pair of atoms and add it to the current 
-                !potential energy sum
-                potential = fourEps * (sigmaDistTwelve - sigmaDistSix)
-                Epot = Epot + potential
-
-                !Calculate the resulting force on the current two atoms 
-                !based on the lennard jones potential between them. Calculated 
-                !using the negative gradient
-                Fmag = twentyFourEps * (2 * sigmaDistTwelve - sigmaDistSix)
-
+                
                 !If the distance between the two atoms is below the cutoff, 
                 !calculate the force exerted on each of them based on the 
                 !lennard jones potential
                 if(distanceSq.LE.cutoffSq) then
+                    if (p==1.AND.i==1.AND.j==2) then
+                        print *, "Distance Between atoms 1 and 9: ", sqrt(distanceSq)  
+                        print *, "Half box size", dim / 2.0
+                    end if
+
+                    sigmaDistTwo = (sigmaSq / distanceSq)
+                    sigmaDistSix = sigmaDistTwo**3 
+                    sigmaDistTwelve = sigmaDistSix**2
+
+                    !Calc potential from lennard jones equation between the 
+                    !current pair of atoms and add it to the current 
+                    !potential energy sum
+                    potential = fourEps * (sigmaDistTwelve - sigmaDistSix)
+                    Epot = Epot + potential
+
+                    !Calculate the resulting force on the current two atoms 
+                    !based on the lennard jones potential between them. Calculated 
+                    !using the negative gradient
+                    Fmag = twentyFourEps * (2 * sigmaDistTwelve - sigmaDistSix)
+
                     do k = 1, numDimensions
                         force(i, k) = force(i, k) + &
                                             &Fmag * (distance(k) / distanceSq)
@@ -179,6 +187,7 @@ program nvtSim
         !Use the leap-frog verlet algorithm to calculate new position and 
         !velocity vectors for all atoms based on the forces 
         !calculated between them.
+        !Additionally, calculate KE from the current stored velocity info
         vSQ = 0.0
         do i = 1, numAtoms
             do k = 1, numDimensions 
@@ -186,20 +195,28 @@ program nvtSim
                 vel(i, k) = vel(i, k) + (force(i, k) / arMass) * (timeStep) 
                 pos(i, k) = pos(i, k) + vel(i, k) * timeStep
                 vSQ = vSQ + ((vOld + vel(i,k)) * 0.5)**2
+                kineticEnergyScale = kineticEnergyScale + 0.5 * arMass * (vel(i,k)**2)
             end do
         end do
+
+        !Scale temp to the desired temperature (94.4K)
+        call scaleTemp(temperature, kineticEnergyScale, vel, &
+                                                &numAtoms, numDimensions, Bolz)
+
 
         !Find the kinetic energy of the system and 
         !the total energy of the system
         kineticEnergy = arMass * vSQ * 0.5
         totEnergy = Epot + kineticEnergy
 
-        !Scale the velocities of the system such 
-        !that the temperature is at 94.4 degrees
-        call scaleTemp(temperature, kineticEnergy, vel, &
-                                                &numAtoms, numDimensions, Bolz)
+        !Output energy information
+        write(91, *) (timeStep * real(p)), totEnergy
+        write(92, *) (timeStep * real(p)), Epot
+        write(93, *) (timeStep * real(p)), kineticEnergy
+        write(96, *) (timeStep * real(p)), (kineticEnergy * 2.0) / &
+                                             &(3.0 * real(numAtoms) * Bolz)
 
-        !Output pos/vel information to a .ttr file
+        !Output pos/vel information to a trajectory file for vmd
         if (mod(p, numTrajSteps) == 0) then
             write(94, *) "Trajectory file for NVT ensemble. 1ns total time"
             write(94, 30) numAtoms
@@ -213,6 +230,7 @@ program nvtSim
             write(94, 20) dim * 1E9, dim * 1E9, dim * 1E9
         end if
 
+        !Output the final frame of the simulation
         if (p == numSteps) then 
             write(95, *) "Final Frame for NVT ensemble. System at 94.4K"
             write(95, 30) numAtoms
@@ -235,6 +253,7 @@ program nvtSim
     close (unit=93)
     close (unit=94)
     close (unit=95)
+    close (unit=96)
 
     CALL cpu_time(end_time)
     print *, "Time usage:", end_time - start_time, " seconds"
@@ -341,7 +360,7 @@ contains
         real(dp) :: nextVSq
 
         !Use equipartition thm to find the current temperature of the system
-        currTemp = (KE * 2.0) / (degreesFreedom * numAtoms * Bolz)
+        currTemp = (KE * 2.0) / (real(degreesFreedom) * real(numAtoms) * Bolz)
         !print *,"currTemp [K]:", currTemp
         tempScale = sqrt(desiredTemp / currTemp)
 
@@ -405,8 +424,8 @@ contains
                 minDistance = real(i) * distStep
             end if
 
-            !Write potential is KJ/mol
-            write(99, *) (real(i) * distStep) * 1E9, potential / 1000 * avagadrosNum
+            !Write potential is kJ/mol
+            write(99, *) (real(i) * distStep) * 1E10, potential / real(1000) * avagadrosNum
         end do
 
         close(unit=99)

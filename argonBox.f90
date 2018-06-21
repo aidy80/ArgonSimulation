@@ -2,14 +2,14 @@
 !February 24, 2018
 !
 !This program outputs a gromacs-formatted-file filled with 864 evenly-space 
-!argon atoms at 90 Kelvin. These atoms exist in a cube  of dimensions 
-!__ __ __.
+!argon atoms at 94.4 Kelvin. These atoms exist in a cube  of dimensions 
+!3.47x3.47x3.47nm.
 
 program argonBox 
     implicit none
 
     !Initial vrms of atoms in the simulation nm/ps
-    real :: vrms = 0.2417
+    real :: vrms = 0.24278
 
     !Number of atoms being simulated
     integer, parameter :: numAtoms = 864
@@ -45,21 +45,18 @@ program argonBox
 
     !Create a random seed for random number generation. 
     !This seed will be modifed upon each iteration using scale, increment, max
-    real :: seed = 1010
-    real :: seedMax = 5070
-    real :: seedScale = 57675
-    real :: seedIncrement = 6850
+    integer :: seed = 1010
 
     !If you want to use rand() 
-    !call random_seed(size = seed)
-    !call srand(seed)
+    call random_seed(size = seed)
+    call srand(seed)
 
     dmdx = dim / xNum
     dmdy = dim / yNum
     dmdz = dim / zNum
 
     !Open a file for writing argon atom information formatted for gromacs
-    open(unit = 1, file='argon.gro')
+    open(unit = 1, file='initArgon.gro')
 
     !The file's header information
     write(1, *) "MD of 864 argon atoms, t = 0.0ns"
@@ -80,8 +77,7 @@ program argonBox
                 !Create a velocity vector in a random direction with 
                 !magnitude vrms (nm/ps)
                 do i = 1, 3
-                    seed = mod(seed * seedScale + seedIncrement, seedMax) 
-                    vel(i) = vrms * ((seed / seedMax) - 0.5)
+                    vel(i) = vrms * (rand() * 2 - 1)
                 end do
 
                 !Normalize the velocity vector
